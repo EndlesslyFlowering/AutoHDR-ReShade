@@ -1,0 +1,5 @@
+*vcxproj.user
+*.addon
+*.pdb
+.vs/
+build/
