@@ -1,10 +1,10 @@
-# AutoHDR
-AutoHDR addon and effect for ReShade 5.4.2
+# AutoHDR (modified)
+AutoHDR addon for ReShade 5.9.2
 
-To install add a ReShade add on path that points to the root of this repository on your local hard disk.  Alternatively copy AutoHDR.fx, AutoHDR32.addon and AutoHDR64.addon to a ReShade add on path location.
+This modified version adds support for scRGB.
 
-You will also need to add a ReShade effect search path to the root of this repository on your local hard disk.
-
-Once done you can enable HDR under the add on tab of ReShade and then be sure to either select AutoHDR.fx OR if installed SonyMegatron.fx.
-
-This add on is ideally intended to be used with the Sony Megatron CRT shader which can be found alongside this repository on my GitHub page. 
+## Installation
+- Get the latest ReShade version **with full add-on suuport** from [here](https://reshade.me/#download) and install it.
+- Download the latest release from [here](https://github.com/EndlesslyFlowering/AutoHDR-ReShade/releases/latest).
+- Copy depending on the game either `AutoHDR64.addon` or `AutoHDR32.addon` to where the ReShade ini files are in the game folder.
+- Have fun :)
