@@ -626,8 +626,10 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID)
     case DLL_PROCESS_ATTACH:
         // Call 'reshade::register_addon()' before you call any other function of the ReShade API.
         // This will look for the ReShade instance in the current process and initialize the API when found.
+        Log(L"dll attached\n");
         if (!reshade::register_addon(hinstDLL))
             return FALSE;
+        Log(L"reshade addon registered\n");
 
         reshade::register_overlay(nullptr, draw_settings_overlay);
         // This registers a callback for the 'present' event, which occurs every time a new frame is presented to the screen.
