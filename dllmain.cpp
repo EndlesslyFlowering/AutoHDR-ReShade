@@ -24,7 +24,7 @@ std::mutex g_mutex;
 #define USE_SCRGB true
 
 bool                    g_hdr_enable            = false;
-bool                    g_use_scrgb              = USE_HDR10;
+bool                    g_use_scrgb             = USE_HDR10;
 DXGI_HDR_METADATA_HDR10 g_hdr10_meta_data       = { 0 };
 bool                    g_hdr_support           = false;
 bool                    g_hdr_enabled           = false;
