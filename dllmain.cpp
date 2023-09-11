@@ -26,7 +26,7 @@ bool                    g_hdr_support           = false;
 bool                    g_hdr_enabled           = false;
 DXGI_COLOR_SPACE_TYPE   g_colour_space          = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
 float                   g_hdr_max_output_nits   = 1000.0f;
-float                   g_hdr_min_output_nits   = 0.001f;
+float                   g_hdr_min_output_nits   = 0.0f;
 float                   g_hdr_max_cll           = 0.0f;
 float                   g_hdr_max_fall          = 0.0f;
 
