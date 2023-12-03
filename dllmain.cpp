@@ -352,6 +352,12 @@ static bool on_create_resource_view(reshade::api::device* device, reshade::api::
                 desc.format = reshade::api::format::r10g10b10a2_unorm;
                 return true;
             }
+
+            if (texture_desc.texture.format == reshade::api::format::r16g16b16a16_float)
+            {
+                desc.format = reshade::api::format::r16g16b16a16_float;
+                return true;
+            }
         }
     }
     return false;
