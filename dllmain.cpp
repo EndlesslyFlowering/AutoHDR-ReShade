@@ -27,7 +27,9 @@ bool                    g_hdr_enable            = false;
 bool                    g_use_scrgb             = USE_HDR10;
 bool                    g_hdr_support           = false;
 bool                    g_hdr_enabled           = false;
+bool                    g_first_csp_change      = true;
 DXGI_COLOR_SPACE_TYPE   g_colour_space          = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+DXGI_FORMAT             g_original_format       = DXGI_FORMAT_R10G10B10A2_UNORM;
 
 reshade::api::device*   g_device                = nullptr;
 
@@ -213,12 +215,22 @@ error:
 void dxgi_swapchain_color_space(
     IDXGISwapChain3* swapchain,
     DXGI_COLOR_SPACE_TYPE* colour_space,
-    DXGI_COLOR_SPACE_TYPE target_colour_space)
+    DXGI_COLOR_SPACE_TYPE  target_colour_space,
+    bool change_to_hdr)
 {
     if (*colour_space != target_colour_space)
     {
         UINT color_space_support = 0;
-        HRESULT hr = swapchain->CheckColorSpaceSupport(target_colour_space, &color_space_support);
+        HRESULT hr;
+
+        if (change_to_hdr)
+        {
+            hr = swapchain->CheckColorSpaceSupport(DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020, &color_space_support);
+        }
+        else
+        {
+            hr = swapchain->CheckColorSpaceSupport(target_colour_space, &color_space_support);
+        }
 
         if (FAILED(hr))
         {
@@ -395,7 +407,7 @@ static void on_present(reshade::api::command_queue* queue, reshade::api::swapcha
                 }
 
                 g_hdr_support = dxgi_check_display_hdr_support(factory, reinterpret_cast<HWND>(swapchain->get_hwnd()));
-                
+
                 factory->Release();
 #endif // __WINRT__
             }
@@ -408,17 +420,6 @@ static void on_present(reshade::api::command_queue* queue, reshade::api::swapcha
 
             if ((g_hdr_enable == true) && (g_hdr_enabled == false))
             {
-                DXGI_COLOR_SPACE_TYPE colour_space = DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
-                DXGI_FORMAT           swapchain_format = DXGI_FORMAT_R10G10B10A2_UNORM;
-
-                if (g_use_scrgb)
-                {
-                    colour_space = DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709;
-                    swapchain_format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-                }
-
-                dxgi_swapchain_color_space(swapchain4, &g_colour_space, colour_space);
-
                 DXGI_SWAP_CHAIN_DESC1 desc;
                 if (FAILED(swapchain4->GetDesc1(&desc)))
                 {
@@ -426,13 +427,30 @@ static void on_present(reshade::api::command_queue* queue, reshade::api::swapcha
                     return;
                 }
 
-                if (swapchain_format != desc.Format)
+                if (g_first_csp_change)
+                {
+                    g_original_format  = desc.Format;
+                    g_first_csp_change = false;
+                }
+
+                DXGI_FORMAT           new_swapchain_format = DXGI_FORMAT_R10G10B10A2_UNORM;
+                DXGI_COLOR_SPACE_TYPE new_colour_space     = DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
+
+                if (g_use_scrgb)
+                {
+                    new_swapchain_format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+                    new_colour_space     = DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709;
+                }
+
+                dxgi_swapchain_color_space(swapchain4, &g_colour_space, new_colour_space, true);
+
+                if (new_swapchain_format != desc.Format)
                 {
                     HRESULT hr = swapchain4->ResizeBuffers(
                         desc.BufferCount,
                         desc.Width,
                         desc.Height,
-                        swapchain_format,
+                        new_swapchain_format,
                         desc.Flags);
 
                     if (hr == DXGI_ERROR_INVALID_CALL) // Ignore invalid call errors since the device is still in a usable state afterwards
@@ -450,10 +468,6 @@ static void on_present(reshade::api::command_queue* queue, reshade::api::swapcha
             }
             else if ((g_hdr_enable == false) && (g_hdr_enabled == true))
             {
-                DXGI_COLOR_SPACE_TYPE colour_space = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
-                DXGI_FORMAT           swapchain_format = DXGI_FORMAT_R8G8B8A8_UNORM;
-
-                dxgi_swapchain_color_space(swapchain4, &g_colour_space, colour_space);
                 DXGI_SWAP_CHAIN_DESC1 desc;
                 if (FAILED(swapchain4->GetDesc1(&desc)))
                 {
@@ -461,13 +475,24 @@ static void on_present(reshade::api::command_queue* queue, reshade::api::swapcha
                     return;
                 }
 
-                if (swapchain_format != desc.Format)
+                if (g_first_csp_change)
+                {
+                    g_original_format  = desc.Format;
+                    g_first_csp_change = false;
+                }
+
+                DXGI_FORMAT           new_swapchain_format = g_original_format;
+                DXGI_COLOR_SPACE_TYPE new_colour_space     = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+
+                dxgi_swapchain_color_space(swapchain4, &g_colour_space, new_colour_space, false);
+
+                if (new_swapchain_format != desc.Format)
                 {
                     HRESULT hr = swapchain4->ResizeBuffers(
                         desc.BufferCount,
                         desc.Width,
                         desc.Height,
-                        swapchain_format,
+                        new_swapchain_format,
                         desc.Flags);
 
                     if (hr == DXGI_ERROR_INVALID_CALL) // Ignore invalid call errors since the device is still in a usable state afterwards
