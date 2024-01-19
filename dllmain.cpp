@@ -298,12 +298,7 @@ static bool on_create_swapchain(reshade::api::swapchain_desc& swapchain_desc, vo
 
         if ((device_type == reshade::api::device_api::d3d11) || (device_type == reshade::api::device_api::d3d12))
         {
-            DXGI_SWAP_EFFECT swap_effect = static_cast<DXGI_SWAP_EFFECT>(swapchain_desc.present_mode);
-
-            swap_effect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-
-            swapchain_desc.present_mode = static_cast<uint32_t>(swap_effect);
-
+            swapchain_desc.present_mode   = static_cast<uint32_t>(DXGI_SWAP_EFFECT_FLIP_DISCARD);
             swapchain_desc.present_flags |= static_cast<uint32_t>(DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING);
         }
     }
