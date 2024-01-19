@@ -2,4 +2,6 @@
 *.addon
 *.pdb
 .vs/
+.vscode/
 build/
+release/
