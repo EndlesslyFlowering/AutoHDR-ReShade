@@ -20,11 +20,11 @@
 std::unordered_set<uint64_t> g_back_buffers;
 std::mutex g_mutex;
 
-#define USE_HDR10 false
-#define USE_SCRGB true
+#define USE_HDR10 true
+#define USE_SCRGB false
 
 bool                    g_hdr_enable            = false;
-bool                    g_use_scrgb             = USE_HDR10;
+bool                    g_use_hdr10             = USE_SCRGB;
 bool                    g_hdr_support           = false;
 bool                    g_hdr_enabled           = false;
 bool                    g_first_csp_change      = true;
@@ -262,7 +262,7 @@ static void on_init_device(reshade::api::device* device)
     g_device = device;
 
     reshade::get_config_value(nullptr, "HDR", "EnableHDR", g_hdr_enable);
-    reshade::get_config_value(nullptr, "HDR", "UseScrgb",  g_use_scrgb);
+    reshade::get_config_value(nullptr, "HDR", "UseHDR10",  g_use_hdr10);
 }
 
 static void on_destroy_device(reshade::api::device* device)
@@ -277,13 +277,11 @@ static void on_destroy_device(reshade::api::device* device)
 
 static bool on_create_swapchain(reshade::api::swapchain_desc& swapchain_desc, void* hwnd)
 {
-    if (!g_use_scrgb)
+    swapchain_desc.back_buffer.texture.format = reshade::api::format::r16g16b16a16_float;
+
+    if (g_use_hdr10)
     {
         swapchain_desc.back_buffer.texture.format = reshade::api::format::r10g10b10a2_unorm;
-    }
-    else
-    {
-        swapchain_desc.back_buffer.texture.format = reshade::api::format::r16g16b16a16_float;
     }
 
     //swapchain_desc.refresh_rate.numerator = 60;
@@ -433,13 +431,13 @@ static void on_present(reshade::api::command_queue* queue, reshade::api::swapcha
                     g_first_csp_change = false;
                 }
 
-                DXGI_FORMAT           new_swapchain_format = DXGI_FORMAT_R10G10B10A2_UNORM;
-                DXGI_COLOR_SPACE_TYPE new_colour_space     = DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
+                DXGI_FORMAT           new_swapchain_format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+                DXGI_COLOR_SPACE_TYPE new_colour_space     = DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709;
 
-                if (g_use_scrgb)
+                if (g_use_hdr10)
                 {
-                    new_swapchain_format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-                    new_colour_space     = DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709;
+                    new_swapchain_format = DXGI_FORMAT_R10G10B10A2_UNORM;
+                    new_colour_space     = DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
                 }
 
                 dxgi_swapchain_color_space(swapchain4, &g_colour_space, new_colour_space, true);
@@ -516,18 +514,18 @@ static void draw_settings_overlay(reshade::api::effect_runtime* runtime)
     if (g_hdr_support)
     {
         bool hdr_enable_modified    = false;
-        bool hdr_use_scrgb_modified = false;
+        bool hdr_use_hdr10_modified = false;
 
         hdr_enable_modified    |= ImGui::Checkbox("Enable HDR", &g_hdr_enable);
-        hdr_use_scrgb_modified |= ImGui::Checkbox("Use scRGB instead of HDR10 (needs game restart)", &g_use_scrgb);
+        hdr_use_hdr10_modified |= ImGui::Checkbox("Use HDR10 instead of scRGB (needs game restart)", &g_use_hdr10);
 
         if (hdr_enable_modified)
         {
             reshade::set_config_value(nullptr, "HDR", "EnableHDR", g_hdr_enable);
         }
-        if (hdr_use_scrgb_modified)
+        if (hdr_use_hdr10_modified)
         {
-            reshade::set_config_value(nullptr, "HDR", "UseScrgb", g_use_scrgb);
+            reshade::set_config_value(nullptr, "HDR", "UseHDR10", g_use_hdr10);
         }
     }
     else
