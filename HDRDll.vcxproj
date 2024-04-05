@@ -73,31 +73,31 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <LinkIncremental>true</LinkIncremental>
-    <TargetExt>.addon</TargetExt>
-    <TargetName>$(ProjectName)32</TargetName>
+    <TargetExt>.addon32</TargetExt>
+    <TargetName>$(ProjectName)</TargetName>
     <IntDir>build\$(Platform)\$(Configuration)\Intermediate\</IntDir>
     <OutDir>$(SolutionDir)build\$(Platform)\$(Configuration)\</OutDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <LinkIncremental>false</LinkIncremental>
-    <TargetExt>.addon</TargetExt>
-    <TargetName>$(ProjectName)32</TargetName>
+    <TargetExt>.addon32</TargetExt>
+    <TargetName>$(ProjectName)</TargetName>
     <IntDir>build\$(Platform)\$(Configuration)\Intermediate\</IntDir>
     <OutDir>$(SolutionDir)build\$(Platform)\$(Configuration)\</OutDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
-    <TargetName>$(ProjectName)64</TargetName>
-    <TargetExt>.addon</TargetExt>
+    <TargetName>$(ProjectName)</TargetName>
+    <TargetExt>.addon64</TargetExt>
+    <IntDir>build\$(Platform)\$(Configuration)\Intermediate\</IntDir>
     <OutDir>$(SolutionDir)build\$(Platform)\$(Configuration)\</OutDir>
-    <IntDir>$(Platform)\$(Configuration)\Intermediate\</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
-    <TargetName>$(ProjectName)64</TargetName>
-    <TargetExt>.addon</TargetExt>
+    <TargetName>$(ProjectName)</TargetName>
+    <TargetExt>.addon64</TargetExt>
+    <IntDir>build\$(Platform)\$(Configuration)\Intermediate\</IntDir>
     <OutDir>$(SolutionDir)build\$(Platform)\$(Configuration)\</OutDir>
-    <IntDir>$(Platform)\$(Configuration)\Intermediate\</IntDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
