@@ -23,15 +23,16 @@ std::mutex g_mutex;
 #define USE_HDR10 true
 #define USE_SCRGB false
 
-bool                    g_hdr_enable            = false;
-bool                    g_use_hdr10             = USE_SCRGB;
-bool                    g_hdr_support           = false;
-bool                    g_hdr_enabled           = false;
-bool                    g_first_csp_change      = true;
-DXGI_COLOR_SPACE_TYPE   g_colour_space          = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
-DXGI_FORMAT             g_original_format       = DXGI_FORMAT_R10G10B10A2_UNORM;
+bool                           g_hdr_enable            = false;
+bool                           g_use_hdr10             = USE_SCRGB;
+bool                           g_hdr_support           = false;
+bool                           g_hdr_enabled           = false;
+bool                           g_first_csp_change      = true;
+DXGI_COLOR_SPACE_TYPE          g_colour_space          = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+DXGI_FORMAT                    g_original_format       = DXGI_FORMAT_R10G10B10A2_UNORM;
 
-reshade::api::device*   g_device                = nullptr;
+reshade::api::device*          g_device                = nullptr;
+reshade::api::effect_runtime*  g_runtime               = nullptr;
 
 inline static int dxgi_compute_intersection_area(
     int ax1, int ay1, int ax2, int ay2,
@@ -212,6 +213,35 @@ error:
     return supported;
 }
 
+void set_reshade_colour_space()
+{
+    if (g_runtime != nullptr)
+    {
+        reshade::api::color_space reshade_colour_space;
+
+        switch(g_colour_space)
+        {
+            case DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020:
+            {
+                reshade_colour_space = reshade::api::color_space::hdr10_st2084;
+            }
+            break;
+            case DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709:
+            {
+                reshade_colour_space = reshade::api::color_space::extended_srgb_linear;
+            }
+            break;
+            default:
+            {
+                reshade_colour_space = reshade::api::color_space::srgb_nonlinear;
+            }
+            break;
+        }
+
+        g_runtime->set_color_space(reshade_colour_space);
+    }
+}
+
 void dxgi_swapchain_color_space(
     IDXGISwapChain3* swapchain,
     DXGI_COLOR_SPACE_TYPE* colour_space,
@@ -247,6 +277,8 @@ void dxgi_swapchain_color_space(
             }
 
             *colour_space = target_colour_space;
+
+            set_reshade_colour_space();
         }
         else
         {
@@ -529,6 +561,11 @@ static void draw_settings_overlay(reshade::api::effect_runtime* runtime)
     }
 }
 
+static void on_init_effect_runtime(reshade::api::effect_runtime* runtime)
+{
+    g_runtime = runtime;
+}
+
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID)
 {
     switch (fdwReason)
@@ -553,6 +590,8 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID)
 
         reshade::register_event<reshade::addon_event::create_resource_view>(&on_create_resource_view);
 
+        reshade::register_event<reshade::addon_event::init_effect_runtime>(on_init_effect_runtime);
+
         reshade::register_event<reshade::addon_event::init_device>(&on_init_device);
         reshade::register_event<reshade::addon_event::destroy_device>(&on_destroy_device);
 
@@ -566,6 +605,8 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID)
         reshade::unregister_event<reshade::addon_event::destroy_swapchain>(on_destroy_swapchain);
 
         reshade::unregister_event<reshade::addon_event::create_resource_view>(&on_create_resource_view);
+
+        reshade::unregister_event<reshade::addon_event::init_effect_runtime>(on_init_effect_runtime);
 
         reshade::unregister_event<reshade::addon_event::init_device>(&on_init_device);
         reshade::unregister_event<reshade::addon_event::destroy_device>(&on_destroy_device);
