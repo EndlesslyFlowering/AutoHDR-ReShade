@@ -20,19 +20,15 @@
 std::unordered_set<uint64_t> g_back_buffers;
 std::mutex g_mutex;
 
-#define USE_HDR10 true
-#define USE_SCRGB false
+bool                          g_hdr_enable       = false;
+bool                          g_use_hdr10        = false;
+bool                          g_hdr_support      = false;
+bool                          g_first_csp_change = true;
+DXGI_COLOR_SPACE_TYPE         g_colour_space     = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+DXGI_FORMAT                   g_original_format  = DXGI_FORMAT_R10G10B10A2_UNORM;
 
-bool                           g_hdr_enable            = false;
-bool                           g_use_hdr10             = USE_SCRGB;
-bool                           g_hdr_support           = false;
-bool                           g_hdr_enabled           = false;
-bool                           g_first_csp_change      = true;
-DXGI_COLOR_SPACE_TYPE          g_colour_space          = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
-DXGI_FORMAT                    g_original_format       = DXGI_FORMAT_R10G10B10A2_UNORM;
-
-reshade::api::device*          g_device                = nullptr;
-reshade::api::effect_runtime*  g_runtime               = nullptr;
+reshade::api::device*         g_device           = nullptr;
+reshade::api::effect_runtime* g_runtime          = nullptr;
 
 inline static int dxgi_compute_intersection_area(
     int ax1, int ay1, int ax2, int ay2,
@@ -221,14 +217,14 @@ void set_reshade_colour_space()
 
         switch(g_colour_space)
         {
-            case DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020:
-            {
-                reshade_colour_space = reshade::api::color_space::hdr10_st2084;
-            }
-            break;
             case DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709:
             {
                 reshade_colour_space = reshade::api::color_space::extended_srgb_linear;
+            }
+            break;
+            case DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020:
+            {
+                reshade_colour_space = reshade::api::color_space::hdr10_st2084;
             }
             break;
             default:
@@ -238,52 +234,41 @@ void set_reshade_colour_space()
             break;
         }
 
+        Log(L"[ReShade]: ReShade colour space %d set\n", g_colour_space);
+
         g_runtime->set_color_space(reshade_colour_space);
     }
 }
 
 void dxgi_swapchain_color_space(
-    IDXGISwapChain3* swapchain,
-    DXGI_COLOR_SPACE_TYPE* colour_space,
-    DXGI_COLOR_SPACE_TYPE  target_colour_space,
-    bool change_to_hdr)
+    IDXGISwapChain3*      swapchain,
+    DXGI_COLOR_SPACE_TYPE target_colour_space)
 {
-    if (*colour_space != target_colour_space)
+    UINT color_space_support = 0;
+
+    if (FAILED(swapchain->CheckColorSpaceSupport(target_colour_space, &color_space_support)))
     {
-        UINT color_space_support = 0;
-        HRESULT hr;
+        Log(L"[DXGI]: Failed to check DXGI swapchain colour space support\n");
+        return;
+    }
 
-        if (change_to_hdr)
+    if((color_space_support & DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT) == DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT)
+    {
+        if (FAILED(swapchain->SetColorSpace1(target_colour_space)))
         {
-            hr = swapchain->CheckColorSpaceSupport(DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020, &color_space_support);
-        }
-        else
-        {
-            hr = swapchain->CheckColorSpaceSupport(target_colour_space, &color_space_support);
-        }
-
-        if (FAILED(hr))
-        {
-            Log(L"[DXGI]: Failed to check DXGI swapchain colour space support\n");
+            Log(L"[DXGI]: Failed to set DXGI swapchain colour space\n");
             return;
         }
 
-        if((color_space_support & DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT) == DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT)
-        {
-            if (FAILED(swapchain->SetColorSpace1(target_colour_space)))
-            {
-                Log (L"[DXGI]: Failed to set DXGI swapchain colour space\n");
-                return;
-            }
+        Log(L"[DXGI]: DXGI swapchain colour space %d set\n", target_colour_space);
 
-            *colour_space = target_colour_space;
+        g_colour_space = target_colour_space;
 
-            set_reshade_colour_space();
-        }
-        else
-        {
-            Log(L"[DXGI]: DXGI swapchain colour space %d (%d) not supported\n", target_colour_space, color_space_support);
-        }
+        set_reshade_colour_space();
+    }
+    else
+    {
+        Log(L"[DXGI]: DXGI swapchain colour space %d (%d) not supported\n", target_colour_space, color_space_support);
     }
 }
 
@@ -293,8 +278,8 @@ static void on_init_device(reshade::api::device* device)
 
     g_device = device;
 
-    reshade::get_config_value(nullptr, "HDR", "EnableHDR", g_hdr_enable);
-    reshade::get_config_value(nullptr, "HDR", "UseHDR10",  g_use_hdr10);
+    reshade::get_config_value(g_runtime, "HDR", "EnableHDR", g_hdr_enable);
+    reshade::get_config_value(g_runtime, "HDR", "UseHDR10",  g_use_hdr10);
 }
 
 static void on_destroy_device(reshade::api::device* device)
@@ -350,6 +335,137 @@ static void on_init_swapchain(reshade::api::swapchain* swapchain)
 
         g_back_buffers.emplace(buffer.handle);
     }
+
+    const reshade::api::device_api device_type = device->get_api();
+
+    if (device_type == reshade::api::device_api::d3d11
+     || device_type == reshade::api::device_api::d3d12)
+    {
+        IDXGISwapChain* native_swapchain = reinterpret_cast<IDXGISwapChain*>(swapchain->get_native());
+        ATL::CComPtr<IDXGISwapChain4> swapchain4;
+
+        if (SUCCEEDED(native_swapchain->QueryInterface(__uuidof(IDXGISwapChain4), (void**)&swapchain4)))
+        {
+            if (g_hdr_support == false)
+            {
+#ifdef __WINRT__
+                IDXGIFactory2* factory = nullptr;
+                if (FAILED(swapchain4->GetParent(__uuidof(IDXGIFactory2), (void**)&factory)))
+                {
+                    Log(L"[DXGI]: Failed to get the swap chain's factory 2\n");
+                    return;
+                }
+
+                g_hdr_support = dxgi_check_display_hdr_support(factory, reinterpret_cast<HWND>(swapchain->get_hwnd()));
+#else
+                IDXGIFactory1* factory = nullptr;
+                if (FAILED(swapchain4->GetParent(__uuidof(IDXGIFactory1), (void**)&factory)))
+                {
+                    Log(L"[DXGI]: Failed to get the swap chain's factory 1\n");
+                    return;
+                }
+
+                g_hdr_support = dxgi_check_display_hdr_support(factory, reinterpret_cast<HWND>(swapchain->get_hwnd()));
+
+                factory->Release();
+#endif // __WINRT__
+            }
+
+            if (g_hdr_support == false)
+            {
+                Log(L"[DXGI]: Failed as no HDR support\n");
+                return;
+            }
+
+            if (g_hdr_enable == true)
+            {
+                DXGI_SWAP_CHAIN_DESC1 desc;
+                if (FAILED(swapchain4->GetDesc1(&desc)))
+                {
+                    Log(L"[DXGI]: Failed to get swap chain description\n");
+                    return;
+                }
+
+                if (g_first_csp_change)
+                {
+                    g_original_format  = desc.Format;
+                    g_first_csp_change = false;
+                }
+
+                DXGI_FORMAT           new_swapchain_format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+                DXGI_COLOR_SPACE_TYPE new_colour_space     = DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709;
+
+                if (g_use_hdr10)
+                {
+                    new_swapchain_format = DXGI_FORMAT_R10G10B10A2_UNORM;
+                    new_colour_space     = DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
+                }
+
+                if (new_swapchain_format != desc.Format
+                 || new_colour_space     != g_colour_space)
+                {
+                    HRESULT hr = swapchain4->ResizeBuffers(
+                        desc.BufferCount,
+                        desc.Width,
+                        desc.Height,
+                        new_swapchain_format,
+                        desc.Flags);
+
+                    if (hr == DXGI_ERROR_INVALID_CALL) // Ignore invalid call errors since the device is still in a usable state afterwards
+                    {
+                        Log(L"[DXGI]: Failed to resize swap chain buffers DXGI_FORMAT_R8G8B8A8_UNORM: error DXGI_ERROR_INVALID_CALL\n");
+                    }
+                    else if (FAILED(hr))
+                    {
+                        Log(L"[DXGI]: Failed to resize swap chain buffers DXGI_FORMAT_R10G10B10A2_UNORM: error 0x%x\n", hr);
+                        return;
+                    }
+                }
+
+                dxgi_swapchain_color_space(swapchain4, new_colour_space);
+            }
+            else if (g_hdr_enable == false)
+            {
+                DXGI_SWAP_CHAIN_DESC1 desc;
+                if (FAILED(swapchain4->GetDesc1(&desc)))
+                {
+                    Log(L"[DXGI]: Failed to get swap chain description\n");
+                    return;
+                }
+
+                if (g_first_csp_change)
+                {
+                    g_original_format  = desc.Format;
+                    g_first_csp_change = false;
+                }
+
+                DXGI_FORMAT           new_swapchain_format = g_original_format;
+                DXGI_COLOR_SPACE_TYPE new_colour_space     = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+
+                if (new_swapchain_format != desc.Format
+                 || new_colour_space     != g_colour_space)
+                {
+                    HRESULT hr = swapchain4->ResizeBuffers(
+                        desc.BufferCount,
+                        desc.Width,
+                        desc.Height,
+                        new_swapchain_format,
+                        desc.Flags);
+
+                    if (hr == DXGI_ERROR_INVALID_CALL) // Ignore invalid call errors since the device is still in a usable state afterwards
+                    {
+                        Log(L"[DXGI]: Failed to resize swap chain buffers DXGI_FORMAT_R8G8B8A8_UNORM: error DXGI_ERROR_INVALID_CALL\n");
+                    }
+                    else if (FAILED(hr))
+                    {
+                        Log(L"[DXGI]: Failed to resize swap chain buffers DXGI_FORMAT_R8G8B8A8_UNORM: error 0x%x\n", hr);
+                    }
+                }
+
+                dxgi_swapchain_color_space(swapchain4, new_colour_space);
+            }
+        }
+    }
 }
 
 static void on_destroy_swapchain(reshade::api::swapchain* swapchain)
@@ -400,142 +516,6 @@ static bool on_create_resource_view(reshade::api::device* device, reshade::api::
     return false;
 }
 
-static void on_present(reshade::api::command_queue* queue, reshade::api::swapchain* swapchain, const reshade::api::rect* source_rect, const reshade::api::rect* dest_rect, uint32_t dirty_rect_count, const reshade::api::rect* dirty_rects)
-{
-    reshade::api::device* device    = swapchain->get_device();
-    const reshade::api::device_api device_type = device->get_api();
-
-    if((device_type == reshade::api::device_api::d3d11) || (device_type == reshade::api::device_api::d3d12))
-    {
-        IDXGISwapChain* native_swapchain = reinterpret_cast<IDXGISwapChain*>(swapchain->get_native());
-        ATL::CComPtr<IDXGISwapChain4> swapchain4;
-
-        if (SUCCEEDED(native_swapchain->QueryInterface(__uuidof(IDXGISwapChain4), (void**)&swapchain4)))
-        {
-            if (g_hdr_support == false)
-            {
-#ifdef __WINRT__
-                IDXGIFactory2* factory = nullptr;
-                if (FAILED(swapchain4->GetParent(__uuidof(IDXGIFactory2), (void**)&factory)))
-                {
-                    Log(L"[DXGI]: Failed to get the swap chain's factory 2\n");
-                    return;
-                }
-
-                g_hdr_support = dxgi_check_display_hdr_support(factory, reinterpret_cast<HWND>(swapchain->get_hwnd()));
-#else
-                IDXGIFactory1* factory = nullptr;
-                if (FAILED(swapchain4->GetParent(__uuidof(IDXGIFactory1), (void**)&factory)))
-                {
-                    Log(L"[DXGI]: Failed to get the swap chain's factory 1\n");
-                    return;
-                }
-
-                g_hdr_support = dxgi_check_display_hdr_support(factory, reinterpret_cast<HWND>(swapchain->get_hwnd()));
-
-                factory->Release();
-#endif // __WINRT__
-            }
-
-            if (g_hdr_support == false)
-            {
-                Log(L"[DXGI]: Failed as no HDR support\n");
-                return;
-            }
-
-            if ((g_hdr_enable == true) && (g_hdr_enabled == false))
-            {
-                DXGI_SWAP_CHAIN_DESC1 desc;
-                if (FAILED(swapchain4->GetDesc1(&desc)))
-                {
-                    Log(L"[DXGI]: Failed to get swap chain description\n");
-                    return;
-                }
-
-                if (g_first_csp_change)
-                {
-                    g_original_format  = desc.Format;
-                    g_first_csp_change = false;
-                }
-
-                DXGI_FORMAT           new_swapchain_format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-                DXGI_COLOR_SPACE_TYPE new_colour_space     = DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709;
-
-                if (g_use_hdr10)
-                {
-                    new_swapchain_format = DXGI_FORMAT_R10G10B10A2_UNORM;
-                    new_colour_space     = DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
-                }
-
-                dxgi_swapchain_color_space(swapchain4, &g_colour_space, new_colour_space, true);
-
-                if (new_swapchain_format != desc.Format)
-                {
-                    HRESULT hr = swapchain4->ResizeBuffers(
-                        desc.BufferCount,
-                        desc.Width,
-                        desc.Height,
-                        new_swapchain_format,
-                        desc.Flags);
-
-                    if (hr == DXGI_ERROR_INVALID_CALL) // Ignore invalid call errors since the device is still in a usable state afterwards
-                    {
-                        Log(L"[DXGI]: Failed to resize swap chain buffers DXGI_FORMAT_R8G8B8A8_UNORM: error DXGI_ERROR_INVALID_CALL\n");
-                    }
-                    else if (FAILED(hr))
-                    {
-                        Log(L"[DXGI]: Failed to resize swap chain buffers DXGI_FORMAT_R10G10B10A2_UNORM: error 0x%x\n", hr);
-                        return;
-                    }
-                }
-
-                g_hdr_enabled = true;
-            }
-            else if ((g_hdr_enable == false) && (g_hdr_enabled == true))
-            {
-                DXGI_SWAP_CHAIN_DESC1 desc;
-                if (FAILED(swapchain4->GetDesc1(&desc)))
-                {
-                    Log(L"[DXGI]: Failed to get swap chain description\n");
-                    return;
-                }
-
-                if (g_first_csp_change)
-                {
-                    g_original_format  = desc.Format;
-                    g_first_csp_change = false;
-                }
-
-                DXGI_FORMAT           new_swapchain_format = g_original_format;
-                DXGI_COLOR_SPACE_TYPE new_colour_space     = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
-
-                dxgi_swapchain_color_space(swapchain4, &g_colour_space, new_colour_space, false);
-
-                if (new_swapchain_format != desc.Format)
-                {
-                    HRESULT hr = swapchain4->ResizeBuffers(
-                        desc.BufferCount,
-                        desc.Width,
-                        desc.Height,
-                        new_swapchain_format,
-                        desc.Flags);
-
-                    if (hr == DXGI_ERROR_INVALID_CALL) // Ignore invalid call errors since the device is still in a usable state afterwards
-                    {
-                        Log(L"[DXGI]: Failed to resize swap chain buffers DXGI_FORMAT_R8G8B8A8_UNORM: error DXGI_ERROR_INVALID_CALL\n");
-                    }
-                    else if (FAILED(hr))
-                    {
-                        Log(L"[DXGI]: Failed to resize swap chain buffers DXGI_FORMAT_R8G8B8A8_UNORM: error 0x%x\n", hr);
-                    }
-                }
-
-                g_hdr_enabled = false;
-            }
-        }
-    }
-}
-
 static void draw_settings_overlay(reshade::api::effect_runtime* runtime)
 {
     if (g_hdr_support)
@@ -544,15 +524,15 @@ static void draw_settings_overlay(reshade::api::effect_runtime* runtime)
         bool hdr_use_hdr10_modified = false;
 
         hdr_enable_modified    |= ImGui::Checkbox("Enable HDR", &g_hdr_enable);
-        hdr_use_hdr10_modified |= ImGui::Checkbox("Use HDR10 instead of scRGB (needs game restart)", &g_use_hdr10);
+        hdr_use_hdr10_modified |= ImGui::Checkbox("Use HDR10 instead of scRGB (needs game restart or chaning the resolution of the game)", &g_use_hdr10);
 
         if (hdr_enable_modified)
         {
-            reshade::set_config_value(nullptr, "HDR", "EnableHDR", g_hdr_enable);
+            reshade::set_config_value(g_runtime, "HDR", "EnableHDR", g_hdr_enable);
         }
         if (hdr_use_hdr10_modified)
         {
-            reshade::set_config_value(nullptr, "HDR", "UseHDR10", g_use_hdr10);
+            reshade::set_config_value(g_runtime, "HDR", "UseHDR10", g_use_hdr10);
         }
     }
     else
@@ -564,6 +544,13 @@ static void draw_settings_overlay(reshade::api::effect_runtime* runtime)
 static void on_init_effect_runtime(reshade::api::effect_runtime* runtime)
 {
     g_runtime = runtime;
+
+    set_reshade_colour_space();
+}
+
+static void on_destroy_effect_runtime(reshade::api::effect_runtime* runtime)
+{
+    g_runtime = nullptr;
 }
 
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID)
@@ -579,11 +566,6 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID)
         Log(L"reshade addon registered\n");
 
         reshade::register_overlay(nullptr, draw_settings_overlay);
-        // This registers a callback for the 'present' event, which occurs every time a new frame is presented to the screen.
-        // The function signature has to match the type defined by 'reshade::addon_event_traits<reshade::addon_event::present>::decl'.
-        // For more details check the inline documentation for each event in 'reshade_events.hpp'.
-        reshade::register_event<reshade::addon_event::present>(&on_present);
-
         reshade::register_event<reshade::addon_event::create_swapchain>(&on_create_swapchain);
         reshade::register_event<reshade::addon_event::init_swapchain>(on_init_swapchain);
         reshade::register_event<reshade::addon_event::destroy_swapchain>(on_destroy_swapchain);
@@ -591,15 +573,13 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID)
         reshade::register_event<reshade::addon_event::create_resource_view>(&on_create_resource_view);
 
         reshade::register_event<reshade::addon_event::init_effect_runtime>(on_init_effect_runtime);
+        reshade::register_event<reshade::addon_event::destroy_effect_runtime>(on_destroy_effect_runtime);
 
         reshade::register_event<reshade::addon_event::init_device>(&on_init_device);
         reshade::register_event<reshade::addon_event::destroy_device>(&on_destroy_device);
 
         break;
     case DLL_PROCESS_DETACH:
-        // Optionally unregister the event callback that was previously registered during process attachment again.
-        reshade::unregister_event<reshade::addon_event::present>(&on_present);
-
         reshade::unregister_event<reshade::addon_event::create_swapchain>(&on_create_swapchain);
         reshade::unregister_event<reshade::addon_event::init_swapchain>(on_init_swapchain);
         reshade::unregister_event<reshade::addon_event::destroy_swapchain>(on_destroy_swapchain);
@@ -607,6 +587,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID)
         reshade::unregister_event<reshade::addon_event::create_resource_view>(&on_create_resource_view);
 
         reshade::unregister_event<reshade::addon_event::init_effect_runtime>(on_init_effect_runtime);
+        reshade::unregister_event<reshade::addon_event::destroy_effect_runtime>(on_destroy_effect_runtime);
 
         reshade::unregister_event<reshade::addon_event::init_device>(&on_init_device);
         reshade::unregister_event<reshade::addon_event::destroy_device>(&on_destroy_device);
