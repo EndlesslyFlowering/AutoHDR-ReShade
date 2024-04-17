@@ -1,5 +1,5 @@
 # AutoHDR (modified)
-AutoHDR addon for ReShade v5.9.2 (and later?).
+AutoHDR addon for ReShade v6.0.0 (and later?).
 
 This modified version adds support for scRGB and removes setting the HDR metadata as it is no longer recommended.
 
